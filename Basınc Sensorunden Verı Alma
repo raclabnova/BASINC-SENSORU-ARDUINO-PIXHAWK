@@ -1,0 +1,80 @@
+
+Kodun çalışabilmesi için MAVLink.h kütüphanesi dahil edilmiş olmalıdır.
+
+
+
+
+ARDUİNO DA BASINÇ VERİSİNİ TERMİNALDE GÖRMEK İÇİN GEREKLİ KOD  
+
+
+#include <MAVLink.h> // Senin kullandığın MAVLink kütüphanesi 
+
+ 
+
+#define SYSID 255 
+
+#define COMPID MAV_COMP_ID_SYSTEM_CONTROL 
+
+ 
+
+mavlink_message_t msg; 
+
+mavlink_status_t status; 
+
+ 
+
+void setup() { 
+
+Serial.begin(115200); // Loglama için 
+
+Serial1.begin(57600); // Pixhawk MAVLink bağlantısı 
+
+delay(3000); 
+
+Serial.println("SCALED_PRESSURE2 verisi bekleniyor..."); 
+
+} 
+
+ 
+
+void loop() { 
+
+while (Serial1.available() > 0) { 
+
+uint8_t c = Serial1.read(); 
+
+ 
+
+if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status)) { 
+
+ 
+
+if (msg.msgid == MAVLINK_MSG_ID_SCALED_PRESSURE2) { 
+
+mavlink_scaled_pressure2_t pressure; 
+
+mavlink_msg_scaled_pressure2_decode(&msg, &pressure); 
+
+ 
+
+Serial.print("Basinc2 [hPa]: "); 
+
+Serial.print(pressure.press_abs); 
+
+Serial.print(" | Sicaklik [C]: "); 
+
+Serial.println(pressure.temperature / 100.0); // °C cinsinden 
+
+} 
+
+ 
+
+// DEBUG için her gelen mesajın ID’sini görmek istersen: 
+
+// Serial.println(msg.msgid); 
+
+} 
+
+} 
+
+} 
