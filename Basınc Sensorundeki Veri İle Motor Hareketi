@@ -3,220 +3,110 @@
 *****ARDUİNO KODU  
 
 
-
-
-#include <MAVLink.h> // MAVLink kütüphanesi 
-
-#define SYSID 255 
-
-#define COMPID MAV_COMP_ID_SYSTEM_CONTROL 
-
- 
-
-mavlink_message_t msg; 
-
-mavlink_status_t status; 
-
- 
-
-// Hedef derinlik (metre cinsinden) — bardakta test için küçük 
-
-float hedef_derinlik = 0.005; // cm 
-
-float P0 = -1; // Başlangıçta tanımsız 
-
- 
-
-// PID kontrol parametreleri 
-
-float Kp = 100.0; 
-
-float Ki = 0.0; 
-
-float Kd = 30.0; 
-
- 
-
-float integral = 0; 
-
-float previous_error = 0; 
-
-unsigned long last_time = 0; 
-
- 
-
-void setup() { 
-
-Serial.begin(115200); // Bilgisayara log için 
-
-Serial1.begin(57600); // Pixhawk MAVLink bağlantısı (TELEM2) 
-
-delay(3000); 
-
-Serial.println("📡 Derinlik kontrolü başlatıldı..."); 
-
-} 
-
- 
-
-void loop() { 
-
-while (Serial1.available() > 0) { 
-
-uint8_t c = Serial1.read(); 
-
- 
-
-if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status)) { 
-
-// Gelen mesaj SCALED_PRESSURE2 ise 
-
-if (msg.msgid == MAVLINK_MSG_ID_SCALED_PRESSURE2) { 
-
-mavlink_scaled_pressure2_t pressure; 
-
-mavlink_msg_scaled_pressure2_decode(&msg, &pressure); 
-
- 
-
-float basinc_hPa = pressure.press_abs; // [hPa] cinsinden mutlak basınç 
-
-float derinlik = hesapla_derinlik(basinc_hPa); 
-
- 
-
-kontrol_motor(derinlik); // PID kontrol uygula 
-
-} 
-
-} 
-
-} 
-
-} 
-
- 
-
-float hesapla_derinlik(float basinc_hPa) { 
-
-float rho = 997.0; // Suyun yoğunluğu 
-
-float g = 9.80665; // Yerçekimi 
-
- 
-
-if (P0 < 0) { 
-
-P0 = basinc_hPa; // İlk ölçümde kalibre et (hava basıncı) 
-
-Serial.print("🔧 Başlangıç basıncı (P0): "); 
-
-Serial.println(P0); 
-
-} 
-
- 
-
-float P = (basinc_hPa - P0) * 100.0; // hPa → Pascal 
-
-float h = P / (rho * g); 
-
- 
-
-if (h < 0) h = 0; 
-
-return h; 
-
-} 
-
- 
-
- 
-
-//  PID kontrol hesapla ve 5-6. motorlara PWM gönder 
-
-void kontrol_motor(float olculen_derinlik) { 
-
-unsigned long now = millis(); 
-
-float dt = (now - last_time) / 1000.0; 
-
-if (dt <= 0) return; 
-
-last_time = now; 
-
- 
-
-float error = hedef_derinlik - olculen_derinlik; 
-
-integral += error * dt; 
-
-float derivative = (error - previous_error) / dt; 
-
-previous_error = error; 
-
- 
-
-float output = Kp * error + Ki * integral + Kd * derivative; 
-
- 
-
-int pwm = 1500 + (int)output; // 1500 nötr 
-
-pwm = constrain(pwm, 1300, 1700); // Güvenli aralık 
-
- 
-
-// 🔁 Yalnızca 5 ve 6. motorlara gönder 
-
-motor_pwm_gonder(5, pwm); 
-
-motor_pwm_gonder(6, pwm); 
-
- 
-
-// 📋 Log yazdır 
-
-Serial.print("Derinlik: "); 
-
-Serial.print(olculen_derinlik, 3); 
-
-Serial.print(" m | PWM: "); 
-
-Serial.println(pwm); 
-
-} 
-
- 
-
-// 📨 MAVLink üzerinden motorlara PWM gönder 
-
-void motor_pwm_gonder(uint8_t motor_no, uint16_t pwm) { 
-
-mavlink_message_t msg; 
-
-uint8_t buf[MAVLINK_MAX_PACKET_LEN]; 
-
- 
-
-mavlink_msg_command_long_pack( 
-
-SYSID, COMPID, &msg, 
-
-1, 1, // target_system, target_component 
-
-MAV_CMD_DO_SET_SERVO, // Komut tipi 
-
-0, // confirmation 
-
-motor_no, pwm, 0, 0, 0, 0, 0 // parametreler: kanal, pwm değeri 
-
-); 
-
- 
-
-uint16_t len = mavlink_msg_to_send_buffer(buf, &msg); 
-
-Serial1.write(buf, len); 
-
-} 
+#include <MAVLink.h>
+
+#define SYSID 255
+#define COMPID MAV_COMP_ID_SYSTEM_CONTROL
+
+mavlink_message_t msg;
+mavlink_status_t status;
+
+float P0 = -1;  // İlk atmosfer basıncı
+float hedef_derinlik = 0.05;  // 5 cm hedef
+
+float Kp = 4000.0;
+float Ki = 120.0;
+float Kd = 2700.0;
+
+float integral = 0;
+float previous_error = 0;
+unsigned long last_time = 0;
+
+void setup() {
+  Serial.begin(115200);
+  Serial1.begin(57600);  // Pixhawk MAVLink
+  delay(5000);  // Pixhawk açılış gecikmesi
+  Serial.println("📡 PID'li derinlik kontrolü (bardak için) başlatıldı");
+}
+
+void loop() {
+  while (Serial1.available() > 0) {
+    uint8_t c = Serial1.read();
+
+    if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status)) {
+      if (msg.msgid == MAVLINK_MSG_ID_SCALED_PRESSURE2) {
+        mavlink_scaled_pressure2_t pressure;
+        mavlink_msg_scaled_pressure2_decode(&msg, &pressure);
+
+        float basinc_hPa = pressure.press_abs;
+        float derinlik = hesapla_derinlik(basinc_hPa);
+        kontrol_motor_pid(derinlik);
+      }
+    }
+  }
+}
+
+// Basınç → Derinlik dönüşümü
+float hesapla_derinlik(float basinc_hPa) {
+  float rho = 997.0;
+  float g = 9.80665;
+
+  if (P0 < 0) {
+    P0 = basinc_hPa;
+    Serial.print("🔧 Başlangıç P0: ");
+    Serial.println(P0);
+  }
+
+  float P = (basinc_hPa - P0) * 100.0;  // hPa to Pa
+  float h = P / (rho * g);
+  if (h < 0) h = 0;
+  return h;
+}
+
+// PID kontrollü motor sürme
+void kontrol_motor_pid(float olculen_derinlik) {
+  unsigned long now = millis();
+  float dt = (now - last_time) / 1000.0;
+  if (dt <= 0) return;
+  last_time = now;
+
+  float error = hedef_derinlik - olculen_derinlik;
+  integral += error * dt;
+  float derivative = (error - previous_error) / dt;
+  previous_error = error;
+
+  float output = Kp * error + Ki * integral + Kd * derivative;
+
+  // ⚠️ Ölü bölge aşımı için minimum tepki
+  if (abs(output) < 100 && abs(error) > 0.005) {
+    output = (output > 0) ? 70 : -100;
+  }
+
+  int pwm = 1500 + (int)output;
+  pwm = constrain(pwm, 1100, 1900);  // ESC güvenli aralığı
+
+  motor_pwm_gonder(5, pwm);
+  motor_pwm_gonder(6, pwm);
+
+  Serial.print("Derinlik: ");
+  Serial.print(olculen_derinlik, 3);
+  Serial.print(" m | PWM: ");
+  Serial.println(pwm);
+}
+
+// PWM sinyali gönderimi
+void motor_pwm_gonder(uint8_t motor_no, uint16_t pwm) {
+  mavlink_message_t msg;
+  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+
+  mavlink_msg_command_long_pack(
+    SYSID, COMPID, &msg,
+    1, 1,
+    MAV_CMD_DO_SET_SERVO,
+    0,
+    motor_no, pwm, 0, 0, 0, 0, 0
+  );
+
+  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+  Serial1.write(buf, len);
+}
